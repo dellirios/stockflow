@@ -1,6 +1,6 @@
 {
   "name": "stockflow",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Sistema de impressão ultra-otimizado para etiquetas",
   "main": "src/app.js",
   "scripts": {
