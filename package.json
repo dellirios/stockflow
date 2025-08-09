@@ -1,0 +1,29 @@
+{
+  "name": "stockflow",
+  "version": "2.0.0",
+  "description": "Sistema de impressão ultra-otimizado para etiquetas",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "test": "node tests/run-tests.js",
+    "test:unit": "node tests/printerService.test.js",
+    "test:integration": "node tests/integration.test.js",
+    "test:printer": "node tests/printer-integration.test.js",
+    "emulator": "node tests/printer-emulator.js",
+    "dev": "NODE_ENV=development node src/app.js",
+    "health": "curl -s http://localhost:5000/health | jq",
+    "metrics": "curl -s http://localhost:5000/metrics | jq"
+  },
+  "dependencies": {
+    "axios": "^1.9.0",
+    "body-parser": "^2.2.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "morgan": "^1.10.0",
+    "winston": "^3.17.0"
+  },
+  "keywords": ["printing", "labels", "zebra", "zpl", "performance"],
+  "author": "StockFlow Team",
+  "license": "MIT"
+}

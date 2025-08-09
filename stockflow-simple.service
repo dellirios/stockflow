@@ -1,0 +1,19 @@
+[Unit]
+Description=StockFlow - Sistema de Impressão Ultra-Otimizado
+After=network.target
+
+[Service]
+Type=simple
+User=stockflow
+Group=stockflow
+ExecStart=/usr/bin/node /home/stockflow/Stockflow/src/app.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+Environment=PORT=5000
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stockflow
+
+[Install]
+WantedBy=multi-user.target

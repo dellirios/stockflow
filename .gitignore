@@ -1,0 +1,71 @@
+# Dependências
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Configurações locais (NÃO COMMITAR)
+config/printers.json
+.env
+.auto-update-config
+
+# Logs
+logs/
+*.log
+
+# Arquivos temporários
+.tmp/
+temp/
+
+# Arquivos de sistema
+.DS_Store
+Thumbs.db
+
+# Arquivos de backup
+*.backup
+*.bak
+*.old
+
+# Arquivos de IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Arquivos de teste
+coverage/
+.nyc_output/
+
+# Arquivos de build
+dist/
+build/
+
+# Certificados e chaves
+*.pem
+*.key
+*.crt
+*.p12
+
+# Dados sensíveis
+secrets/
+keys/
+
+# Cache
+.cache/
+.parcel-cache/
+
+# Runtime
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Diretório de uploads
+uploads/
+
+# Arquivos específicos do StockFlow
+printer-emulator.log
+impressao_*.ndjson
+# Backup de scripts antigos
+scripts-backup-*/
