@@ -72,6 +72,14 @@ show_help() {
     echo "  update-test      - Testa conectividade"
     echo "  update-logs      - Mostra logs"
     echo ""
+    echo "📋 VERSIONAMENTO:"
+    echo "  version          - Informações de versão"
+    echo "  version-check    - Verifica atualizações"
+    echo "  version-update   - Atualiza para nova versão"
+    echo "  version-config   - Configuração de versionamento"
+    echo "  version-releases - Lista releases disponíveis"
+    echo "  version-backups  - Lista backups disponíveis"
+    echo ""
     echo "🔍 DIAGNÓSTICO:"
     echo "  status           - Status geral do sistema"
     echo "  demo             - Demonstração e verificação"
@@ -507,6 +515,24 @@ case "$1" in
         ;;
     "setup-system")
         setup_system
+        ;;
+    "version")
+        cd "$PROJECT_DIR" && node version-cli.js info
+        ;;
+    "version-check")
+        cd "$PROJECT_DIR" && node version-cli.js check
+        ;;
+    "version-update")
+        cd "$PROJECT_DIR" && node version-cli.js update
+        ;;
+    "version-config")
+        cd "$PROJECT_DIR" && node version-cli.js config show
+        ;;
+    "version-releases")
+        cd "$PROJECT_DIR" && node version-cli.js releases
+        ;;
+    "version-backups")
+        cd "$PROJECT_DIR" && node version-cli.js backups
         ;;
     "help"|"")
         show_help

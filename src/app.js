@@ -7,7 +7,9 @@ const morgan = require('morgan');
 const cors = require('cors');
 const axios = require('axios');
 const etiquetasRouter = require('./api/etiquetas');
+const versionRouter = require('./api/version');
 const { imprimirEtiquetas, getHealthStats } = require('./services/printerService');
+const VersionManager = require('./utils/versionManager');
 
 // ---------- Configuração e Constantes ---------- //
 const PORT = process.env.PORT || 5000;
@@ -70,6 +72,7 @@ app.get('/health', (req, res) => {
   }
 });
 app.use('/imprimir-etiqueta', etiquetasRouter);
+app.use('/api/version', versionRouter);
 
 // Endpoint de métricas simplificado
 app.get('/metrics', (req, res) => {
@@ -198,8 +201,18 @@ async function iniciarDaemon() {
 
 
 // ---------- Inicialização e Desligamento Gracioso ---------- //
+// Inicializar sistema de versionamento
+const versionManager = new VersionManager();
+
 const server = app.listen(PORT, HOST, () => {
   logger.info(`Servidor HTTP rodando em http://${HOST}:${PORT}`);
+  
+  // Inicializar auto-update se habilitado
+  if (versionManager.config.autoUpdate) {
+    versionManager.startAutoUpdateScheduler();
+    logger.info('Sistema de auto-update inicializado');
+  }
+  
   // Inicia o daemon apenas depois que o servidor estiver no ar.
   iniciarDaemon();
 });
@@ -207,6 +220,12 @@ const server = app.listen(PORT, HOST, () => {
 function gracefulShutdown() {
   logger.info('Recebido sinal de desligamento. Encerrando graciosamente...');
   keepRunning = false; // Sinaliza para o daemon parar o loop
+  
+  // Parar auto-update scheduler
+  if (versionManager) {
+    versionManager.stopAutoUpdateScheduler();
+    logger.info('Auto-update scheduler parado');
+  }
 
   server.close(() => {
     logger.info('Servidor HTTP encerrado.');

@@ -1,0 +1,14 @@
+{
+  "repository": "dellirios/stockflow",
+  "branch": "main",
+  "autoUpdate": false,
+  "checkInterval": 3600000,
+  "preserveFiles": [
+    "config/printers.json",
+    "logs/",
+    ".env",
+    ".version-config.json",
+    ".auto-update-config"
+  ],
+  "githubToken": ""
+}
