@@ -2,6 +2,34 @@
 
 > Sistema de gestão de estoque com impressão de etiquetas, auto-atualização e otimização para produção.
 
+## 📖 About / Sobre
+
+**StockFlow** é uma solução completa e moderna para gestão de estoque desenvolvida especificamente para ambientes empresariais que necessitam de controle preciso de inventário e impressão automatizada de etiquetas.
+
+### 🎯 Propósito
+
+Este sistema foi criado para resolver os desafios comuns enfrentados por empresas na gestão de estoque:
+- **Controle de Inventário**: Rastreamento preciso de produtos e quantidades
+- **Impressão Automatizada**: Geração e impressão de etiquetas em tempo real
+- **Integração Empresarial**: API RESTful para integração com sistemas existentes
+- **Manutenção Simplificada**: Auto-atualização e gerenciamento unificado
+
+### 🏢 Casos de Uso
+
+- **Varejo**: Controle de estoque de lojas e e-commerce
+- **Indústria**: Gestão de matérias-primas e produtos acabados
+- **Logística**: Rastreamento de mercadorias em centros de distribuição
+- **Farmácias**: Controle rigoroso de medicamentos e validades
+- **Supermercados**: Gestão de produtos perecíveis e não-perecíveis
+
+### 🔧 Tecnologias
+
+- **Backend**: Node.js + Express.js
+- **Impressão**: ZPL (Zebra Programming Language)
+- **Serviços**: systemd para alta disponibilidade
+- **Logs**: Sistema de logging estruturado
+- **Testes**: Jest para testes automatizados
+
 ## 🚀 Visão Geral
 
 O StockFlow é um sistema Node.js robusto para gestão de estoque com funcionalidades avançadas de impressão, auto-atualização automática e otimização para ambiente de produção.
