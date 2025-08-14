@@ -1,28 +1,13 @@
 {
   "name": "stockflow",
-  "version": "2.0.2",
+  "version": "2.0.1",
   "description": "Sistema de impressão ultra-otimizado para etiquetas",
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
-    "test": "node tests/run-tests.js",
-    "test:unit": "node tests/printerService.test.js",
-    "test:integration": "node tests/integration.test.js",
-    "test:printer": "node tests/printer-integration.test.js",
-    "emulator": "node tests/printer-emulator.js",
     "dev": "NODE_ENV=development node src/app.js",
     "health": "curl -s http://localhost:5000/health | jq",
-    "metrics": "curl -s http://localhost:5000/metrics | jq",
-    "version": "node version-cli.js",
-    "version:info": "node version-cli.js info",
-    "version:check": "node version-cli.js check",
-    "version:update": "node version-cli.js update",
-    "version:increment": "node version-cli.js increment",
-    "version:config": "node version-cli.js config show",
-    "version:enable-auto": "node version-cli.js enable-auto",
-    "version:disable-auto": "node version-cli.js disable-auto",
-    "version:releases": "node version-cli.js releases",
-    "version:backups": "node version-cli.js backups"
+    "metrics": "curl -s http://localhost:5000/metrics | jq"
   },
   "dependencies": {
     "axios": "^1.9.0",
@@ -31,6 +16,7 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "morgan": "^1.10.0",
+    "mysql2": "^3.6.5",
     "winston": "^3.17.0"
   },
   "keywords": [

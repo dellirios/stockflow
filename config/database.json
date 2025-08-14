@@ -1,0 +1,12 @@
+{
+  "host": "193.203.175.227",
+  "port": 3306,
+  "user": "u462461747_stockflow",
+  "password": "!34Bolas",
+  "database": "u462461747_stockflow",
+  "charset": "utf8mb4",
+  "timezone": "+00:00",
+  "acquireTimeout": 60000,
+  "timeout": 60000,
+  "reconnect": true
+}

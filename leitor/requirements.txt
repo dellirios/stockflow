@@ -1,0 +1,21 @@
+# Dependências do Serviço Stockflow QR Reader
+# Instalar com: pip install -r requirements.txt
+
+# Conexão com banco de dados MySQL
+mysql-connector-python>=8.0.0
+
+# Monitoramento de eventos de entrada (leitor QR Code)
+evdev>=1.4.0
+
+# Bibliotecas padrão já incluídas no Python 3:
+# - json
+# - os
+# - time
+# - logging
+# - threading
+# - queue
+# - collections
+# - signal
+# - sys
+# - datetime
+# - re

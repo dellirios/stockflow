@@ -14,9 +14,9 @@ const versionManager = new VersionManager();
  * GET /api/version/info
  * Obtém informações de versão atual e disponível
  */
-router.get('/info', async (req, res) => {
+router.get('/info', (req, res) => {
     try {
-        const versionInfo = await versionManager.getVersionInfo();
+        const versionInfo = versionManager.getVersionInfo();
         
         res.json({
             success: true,

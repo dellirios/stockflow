@@ -1,58 +1,87 @@
-const { logImpressao } = require('../utils/logger'); // coloque essa função em utils/logger.js
+const fs = require('fs');
+const path = require('path');
 
-async function imprimirEtiquetas(payload) {
-    // ...restante do código
-    for (const [storeKey, etiquetas] of Object.entries(agrupados)) {
-        const printerInfo = printersConfig[storeKey];
-        // ...verificações
-
-        for (const etiqueta of etiquetas) {
-            // ...Geração e impressão do ZPL
-            const quantidade = Number(etiqueta.etiquetas) || 1;
-            const now = new Date();
-
-            let status = 'impresso';
-            let mensagem = 'OK';
-
-            try {
-                await new Promise((resolve, reject) => {
-                    exec(`lp -d ${printerInfo.impressora} ${zplPath}`, (error, stdout, stderr) => {
-                        if (error) {
-                            status = 'erro';
-                            mensagem = stderr;
-                            return reject(error);
-                        }
-                        mensagem = stdout;
-                        resolve();
-                    });
-                });
-            } catch (err) {
-                // erro já capturado
-            }
-            fs.unlinkSync(zplPath);
-
-            // Registro de LOG
-            logImpressao({
-                data: now.toISOString().split('T')[0], // YYYY-MM-DD
-                hora: now.toTimeString().split(' ')[0], // HH:MM:SS
-                store_key: storeKey,
-                nm_empresa: etiqueta.nm_empresa,
-                id_produto: etiqueta.id_produto,
-                nome_produto: etiqueta.nome,
-                quantidade: quantidade,
-                impressora: printerInfo.impressora,
-                status: status,
-                mensagem: mensagem,
-                anydesk_id: process.env.ANYDESK_ID || 'N/A'
-            });
-
-            resultados.push({
-                id: etiqueta.id_produto,
-                store_key: storeKey,
-                status: status,
-                mensagem: mensagem
-            });
-        }
-    }
-    return resultados;
+/**
+ * Função para registrar logs de impressão
+ * @param {Object} logData - Dados do log de impressão
+ */
+function logImpressao(logData) {
+  try {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      type: 'impressao',
+      ...logData
+    };
+    
+    console.log('[IMPRESSAO]', JSON.stringify(logEntry));
+  } catch (error) {
+    console.error('Erro ao registrar log de impressão:', error.message);
+  }
 }
+
+/**
+ * Função para registrar logs de informação
+ * @param {string} message - Mensagem do log
+ * @param {Object} data - Dados adicionais
+ */
+function logInfo(message, data = {}) {
+  try {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: 'INFO',
+      message,
+      ...data
+    };
+    
+    console.log('[INFO]', message, data);
+  } catch (error) {
+    console.error('Erro ao registrar log de info:', error.message);
+  }
+}
+
+/**
+ * Função para registrar logs de erro
+ * @param {string} message - Mensagem do log
+ * @param {Object} data - Dados adicionais
+ */
+function logError(message, data = {}) {
+  try {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: 'ERROR',
+      message,
+      ...data
+    };
+    
+    console.error('[ERROR]', message, data);
+  } catch (error) {
+    console.error('Erro ao registrar log de erro:', error.message);
+  }
+}
+
+/**
+ * Função para registrar logs de aviso
+ * @param {string} message - Mensagem do log
+ * @param {Object} data - Dados adicionais
+ */
+function logWarning(message, data = {}) {
+  try {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: 'WARNING',
+      message,
+      ...data
+    };
+    
+    console.warn('[WARNING]', message, data);
+  } catch (error) {
+    console.error('Erro ao registrar log de warning:', error.message);
+  }
+}
+
+module.exports = {
+  logImpressao,
+  logInfo,
+  logError,
+  logWarning
+};

@@ -1,0 +1,9 @@
+{
+  "preferred_device": {
+    "name": "ARM CM0 USB HID Keyboard",
+    "path": "/dev/input/event11",
+    "vendor_id": 65535,
+    "product_id": 53,
+    "last_used": "2025-08-13T23:36:38.210028"
+  }
+}

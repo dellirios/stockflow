@@ -32,6 +32,10 @@ const logger = {
 // ---------- Aplicação Express ---------- //
 const app = express();
 
+// ---------- Inicialização do Version Manager ---------- //
+const versionManager = new VersionManager();
+logger.info(`StockFlow v${versionManager.getCurrentVersion()} iniciado`);
+
 // Segurança: remover header X-Powered-By
 app.disable('x-powered-by');
 app.use((req, res, next) => {
@@ -50,7 +54,17 @@ app.use(cors({
 // Use um logger HTTP menos verboso em produção.
 app.use(IS_PROD ? morgan('tiny') : morgan('dev'));
 
+// Debug middleware temporário
+app.use((req, res, next) => {
+  console.log(`[DEBUG] ${req.method} ${req.url}`);
+  next();
+});
+
 // ---------- Rotas e Middlewares ---------- //
+
+app.use('/imprimir-etiqueta', etiquetasRouter);
+app.use('/api/version', versionRouter);
+
 app.get('/health', (req, res) => {
   try {
     const healthStats = getHealthStats();
@@ -71,8 +85,6 @@ app.get('/health', (req, res) => {
     res.status(500).json({ status: 'error', message: err.message });
   }
 });
-app.use('/imprimir-etiqueta', etiquetasRouter);
-app.use('/api/version', versionRouter);
 
 // Endpoint de métricas simplificado
 app.get('/metrics', (req, res) => {
@@ -201,17 +213,12 @@ async function iniciarDaemon() {
 
 
 // ---------- Inicialização e Desligamento Gracioso ---------- //
-// Inicializar sistema de versionamento
-const versionManager = new VersionManager();
+
 
 const server = app.listen(PORT, HOST, () => {
   logger.info(`Servidor HTTP rodando em http://${HOST}:${PORT}`);
   
-  // Inicializar auto-update se habilitado
-  if (versionManager.config.autoUpdate) {
-    versionManager.startAutoUpdateScheduler();
-    logger.info('Sistema de auto-update inicializado');
-  }
+
   
   // Inicia o daemon apenas depois que o servidor estiver no ar.
   iniciarDaemon();
@@ -221,11 +228,7 @@ function gracefulShutdown() {
   logger.info('Recebido sinal de desligamento. Encerrando graciosamente...');
   keepRunning = false; // Sinaliza para o daemon parar o loop
   
-  // Parar auto-update scheduler
-  if (versionManager) {
-    versionManager.stopAutoUpdateScheduler();
-    logger.info('Auto-update scheduler parado');
-  }
+
 
   server.close(() => {
     logger.info('Servidor HTTP encerrado.');

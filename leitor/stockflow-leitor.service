@@ -1,0 +1,21 @@
+[Unit]
+Description=Stockflow QR Code Reader Service
+After=network.target mysql.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=stockflow
+Group=stockflow
+ExecStart=/usr/bin/python3 /home/stockflow/Stockflow/leitor/leitor.py
+Restart=always
+RestartSec=10
+Environment=HOME=/home/stockflow
+Environment=USER=stockflow
+Environment=PYTHONPATH=/home/stockflow/Stockflow/leitor
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stockflow-leitor
+
+[Install]
+WantedBy=multi-user.target
