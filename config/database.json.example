@@ -1,9 +1,9 @@
 {
   "host": "localhost",
   "port": 3306,
-  "user": "u462461747_stockflow",
+  "user": "stockflow",
   "password": "sua_senha_aqui",
-  "database": "u462461747_stockflow",
+  "database": "stockflow",
   "charset": "utf8mb4",
   "timezone": "+00:00",
   "acquireTimeout": 60000,
