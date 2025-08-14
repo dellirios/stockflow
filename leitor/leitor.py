@@ -47,11 +47,11 @@ class StockflowQRService:
         
         # Configuração do banco de dados
         self.db_config = {
-            "host": "193.203.175.227",
+            "host": "localhost",
             "port": 3306,
-            "user": "u462461747_stockflow",
-            "password": "!34Bolas",
-            "database": "u462461747_stockflow",
+            "user": "root",
+            "password": "",
+            "database": "flow",
             "charset": "utf8mb4",
             "autocommit": False,
             "pool_name": "stockflow_pool",
