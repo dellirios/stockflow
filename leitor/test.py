@@ -71,11 +71,11 @@ def test_database_connection():
         import mysql.connector
         
         db_config = {
-            "host": "193.203.175.227",
+            "host": "",
             "port": 3306,
-            "user": "u462461747_stockflow",
-            "password": "!34Bolas",
-            "database": "u462461747_stockflow",
+            "user": "",
+            "password": "",
+            "database": "",
             "charset": "utf8mb4",
             "connection_timeout": 10
         }
