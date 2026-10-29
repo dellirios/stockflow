@@ -6,18 +6,28 @@ Autor: Sistema Stockflow
 Descrição: Serviço independente e resiliente para processamento de produtos
 """
 
-import mysql.connector
-from mysql.connector import pooling, Error as MySQLError
+try:
+    import mysql.connector
+    from mysql.connector import pooling, Error as MySQLError
+    MYSQL_AVAILABLE = True
+except ImportError:
+    mysql = None
+    pooling = None
+    MYSQL_AVAILABLE = False
+    MySQLError = Exception
+    print("AVISO: mysql-connector não está disponível. Instale com: apt install python3-mysql.connector")
 import json
 import os
 import time
 import logging
+from logging.handlers import TimedRotatingFileHandler
 import threading
 from queue import Queue, Empty
 from collections import deque
 import signal
 import sys
 from datetime import datetime
+from decimal import Decimal
 import re
 
 # Importações para monitoramento de eventos de teclado
@@ -33,13 +43,14 @@ class StockflowQRService:
     def __init__(self):
         self.running = False
         self.store_key = None
+        self.store_keys = []
         self.db_pool = None
         self.job_queue = deque()
-        self.job_file = '/home/stockflow/Stockflow/leitor/jobs.json'
-        self.config_file = '/home/stockflow/Stockflow/config/printers.json'
+        self.job_file = '/home/stockflow/stockflow/leitor/jobs.json'
+        self.config_file = '/home/stockflow/stockflow/config/printers.json'
         self.input_device = None
         self.current_input = ""
-        self.device_config_file = "/home/stockflow/Stockflow/config/device_config.json"
+        self.device_config_file = "/home/stockflow/stockflow/config/device_config.json"
         self.preferred_device = None
         
         # Configuração de logging
@@ -47,17 +58,18 @@ class StockflowQRService:
         
         # Configuração do banco de dados
         self.db_config = {
-            "host": "localhost",
-            "port": 3306,
-            "user": "root",
-            "password": "",
-            "database": "flow",
+            "host": os.getenv("QRCODE_DB_HOST", "localhost"),
+            "port": int(os.getenv("QRCODE_DB_PORT", "3306")),
+            "user": os.getenv("QRCODE_DB_USER", "root"),
+            "password": os.getenv("QRCODE_DB_PASSWORD", ""),
+            "database": os.getenv("QRCODE_DB_NAME", "flow"),
             "charset": "utf8mb4",
             "autocommit": False,
             "pool_name": "stockflow_pool",
             "pool_size": 5,
             "pool_reset_session": True
         }
+        self.force_device_path = os.getenv("LEITOR_DEVICE_PATH", "").strip()
         
         # Thread para processamento da fila
         self.queue_processor_thread = None
@@ -73,11 +85,18 @@ class StockflowQRService:
     def setup_logging(self):
         """Configura o sistema de logging estruturado"""
         log_format = '[%(asctime)s] %(levelname)s: %(message)s'
+        log_file = '/home/stockflow/stockflow/leitor/leitor.log'
         logging.basicConfig(
             level=logging.INFO,
             format=log_format,
             handlers=[
-                logging.FileHandler('/home/stockflow/Stockflow/leitor/leitor.log'),
+                TimedRotatingFileHandler(
+                    log_file,
+                    when='midnight',
+                    interval=1,
+                    backupCount=1,
+                    encoding='utf-8'
+                ),
                 logging.StreamHandler(sys.stdout)
             ]
         )
@@ -98,12 +117,42 @@ class StockflowQRService:
             with open(self.config_file, 'r', encoding='utf-8') as f:
                 config = json.load(f)
             
-            if 'store_key' not in config:
+            store_keys = []
+
+            # Formato legado: {"store_key":"..."}
+            # Formato atual do Stockflow: {"impressoras":[{"id":"..."}]}
+            if 'store_key' in config and config['store_key']:
+                store_keys.append(str(config['store_key']).strip())
+
+            impressoras = config.get('impressoras')
+            if isinstance(impressoras, list):
+                for impressora in impressoras:
+                    if not isinstance(impressora, dict):
+                        continue
+                    if impressora.get('ativo') is False:
+                        continue
+
+                    candidate = impressora.get('id') or impressora.get('store_key')
+                    if candidate:
+                        store_keys.append(str(candidate).strip())
+
+            for key, value in config.items():
+                if key in ('store_key', 'store_name', 'qr_code_settings', 'impressoras'):
+                    continue
+                if isinstance(value, dict) and value.get('ativo') is not False:
+                    store_keys.append(str(key).strip())
+
+            self.store_keys = list(dict.fromkeys(key for key in store_keys if key))
+            self.store_key = self.store_keys[0] if self.store_keys else None
+
+            if not self.store_keys:
                 self.logger.error("store_key não encontrado no arquivo de configuração")
                 return False
-            
-            self.store_key = config['store_key']
-            self.logger.info(f"Configuração carregada. Store Key: {self.store_key}")
+
+            self.logger.info(
+                "Configuração carregada. Store Keys: %s",
+                ', '.join(self.store_keys)
+            )
             
             # Carrega configuração do dispositivo preferido
             self.load_device_config()
@@ -157,7 +206,19 @@ class StockflowQRService:
     
     def setup_database_pool(self):
         """Configura o pool de conexões com o banco de dados"""
+        if not MYSQL_AVAILABLE:
+            self.logger.error("Dependência ausente: mysql-connector-python")
+            self.db_connected = False
+            return False
+
         try:
+            self.logger.info(
+                "Conectando ao MySQL em %s:%s (db=%s, user=%s)",
+                self.db_config.get("host"),
+                self.db_config.get("port"),
+                self.db_config.get("database"),
+                self.db_config.get("user"),
+            )
             self.db_pool = pooling.MySQLConnectionPool(**self.db_config)
             self.db_connected = True
             self.logger.info("Pool de conexões MySQL criado com sucesso")
@@ -248,13 +309,23 @@ class StockflowQRService:
             # Inicia transação
             connection.start_transaction()
             
-            # Verifica se o produto existe
-            check_query = "SELECT * FROM tb_produto WHERE id_produto = %s AND store_key = %s"
-            cursor.execute(check_query, (product_id, self.store_key))
+            # Verifica se o produto existe em qualquer loja/restaurante configurado.
+            store_placeholders = ', '.join(['%s'] * len(self.store_keys))
+            check_query = (
+                f"SELECT * FROM tb_produto "
+                f"WHERE id_produto = %s AND store_key IN ({store_placeholders}) "
+                f"ORDER BY FIELD(store_key, {store_placeholders}) "
+                f"LIMIT 1"
+            )
+            cursor.execute(check_query, [product_id] + self.store_keys + self.store_keys)
             produto = cursor.fetchone()
             
             if not produto:
-                self.logger.warning(f"Produto não encontrado: ID={product_id}, Store={self.store_key}")
+                self.logger.warning(
+                    "Produto não encontrado: ID=%s, Stores=%s",
+                    product_id,
+                    ', '.join(self.store_keys)
+                )
                 connection.rollback()
                 return False
             
@@ -265,12 +336,13 @@ class StockflowQRService:
             
             # Monta dados para inserção na tabela tb_produto_removido
             # Não incluímos id_removido pois será gerado automaticamente (AUTO_INCREMENT)
+            unit_quantity = Decimal('1')
             produto_removido = {
                 'store_key': produto['store_key'],
                 'nome': produto['nome'],
                 'peso': produto['peso'],
                 'grupo': produto['grupo'],
-                'quantidade': produto['quantidade'],
+                'quantidade': unit_quantity,
                 'conservacao': produto['conservacao'],
                 'data_entrada': produto['data_entrada'],
                 'data_retirada': data_retirada_sp,
@@ -279,7 +351,7 @@ class StockflowQRService:
                 'responsavel_retirada': 'Leitor QRCODE',
                 'preco': produto['preco'],
                 'unidade_medida': produto['unidade_medida'],
-                'etiquetas': produto['etiquetas'],
+                'etiquetas': unit_quantity,
                 'status': produto['status'],
                 'fornecedor': produto['fornecedor'],
                 'sif_lote': produto['sif_lote'],
@@ -295,14 +367,38 @@ class StockflowQRService:
             
             cursor.execute(insert_query, list(produto_removido.values()))
             
-            # Remove da tabela original
-            delete_query = "DELETE FROM tb_produto WHERE id_produto = %s AND store_key = %s"
-            cursor.execute(delete_query, (product_id, self.store_key))
+            remaining_quantity = Decimal(str(produto['quantidade'])) - unit_quantity
+            remaining_labels = Decimal(str(produto.get('etiquetas') or 0)) - unit_quantity
+
+            if remaining_quantity > 0:
+                update_query = (
+                    "UPDATE tb_produto "
+                    "SET quantidade = %s, etiquetas = %s "
+                    "WHERE id_produto = %s AND store_key = %s"
+                )
+                cursor.execute(
+                    update_query,
+                    (
+                        remaining_quantity,
+                        max(remaining_labels, Decimal('0')),
+                        product_id,
+                        produto['store_key']
+                    )
+                )
+            else:
+                # Remove da tabela original quando a última unidade é baixada.
+                delete_query = "DELETE FROM tb_produto WHERE id_produto = %s AND store_key = %s"
+                cursor.execute(delete_query, (product_id, produto['store_key']))
             
             # Confirma transação
             connection.commit()
             
-            self.logger.info(f"Produto processado com sucesso: {product_id}")
+            self.logger.info(
+                "Produto processado com sucesso: %s (Store=%s, unidade removida=1, quantidade restante=%s)",
+                product_id,
+                produto['store_key'],
+                max(remaining_quantity, Decimal('0'))
+            )
             return True
             
         except MySQLError as e:
@@ -382,11 +478,11 @@ class StockflowQRService:
                     device = evdev.InputDevice(path)
                     devices.append(device)
                 except (OSError, PermissionError) as e:
-                    self.logger.warning(f"Não foi possível acessar dispositivo {path}: {e}")
+                    self.logger.debug(f"Não foi possível acessar dispositivo {path}: {e}")
                     continue
             
             if not devices:
-                self.logger.error("Nenhum dispositivo de entrada encontrado")
+                self.logger.debug("Nenhum dispositivo de entrada encontrado")
                 return None
             
             # Lista de critérios de prioridade para identificar leitores QR Code
@@ -401,9 +497,18 @@ class StockflowQRService:
                 ['usb keyboard', 'keyboard']
             ]
             
-            self.logger.info(f"Dispositivos de entrada encontrados: {len(devices)}")
+            self.logger.debug(f"Dispositivos de entrada encontrados: {len(devices)}")
             for device in devices:
                 self.logger.debug(f"  - {device.name} ({device.path})")
+
+            # Permite fixar explicitamente um device path por ambiente.
+            if self.force_device_path:
+                forced = next((d for d in devices if d.path == os.path.realpath(self.force_device_path)), None)
+                if forced and self.validate_device_capabilities(forced):
+                    self.logger.info(f"Usando dispositivo forçado via LEITOR_DEVICE_PATH: {forced.name} ({forced.path})")
+                    return forced
+                self.logger.warning(f"LEITOR_DEVICE_PATH configurado, mas inválido/inacessível: {self.force_device_path}")
+                return None
             
             # Primeiro, tenta usar o dispositivo preferido se disponível
             if self.preferred_device:
@@ -447,7 +552,7 @@ class StockflowQRService:
                                 self.logger.warning(f"Dispositivo {device.name} não tem capacidades adequadas")
                                 break
             
-            self.logger.error("Nenhum dispositivo de entrada adequado encontrado")
+            self.logger.debug("Nenhum dispositivo de entrada adequado encontrado")
             return None
             
         except Exception as e:
@@ -463,15 +568,10 @@ class StockflowQRService:
             if ecodes.EV_KEY not in capabilities:
                 return False
             
-            # Verifica se tem teclas básicas necessárias (números e enter)
+            # Verifica se tem ao menos tecla de finalização.
             key_codes = capabilities[ecodes.EV_KEY]
-            required_keys = [ecodes.KEY_ENTER, ecodes.KEY_0, ecodes.KEY_1]
-            
-            for key in required_keys:
-                if key not in key_codes:
-                    return False
-            
-            return True
+            has_enter = (ecodes.KEY_ENTER in key_codes) or (getattr(ecodes, 'KEY_KPENTER', -1) in key_codes)
+            return has_enter
             
         except Exception as e:
             self.logger.warning(f"Erro ao validar capacidades do dispositivo {device.name}: {e}")
@@ -623,34 +723,27 @@ class StockflowQRService:
     def monitor_input_events(self):
         """Monitora eventos de entrada do leitor QR Code com fallback automático"""
         device_retry_count = 0
-        max_device_retries = 3
-        
+        missing_device_alerted = False
+        # Intervalos de espera progressivos: 10s, 30s, 60s (máximo)
+        retry_intervals = [10, 30, 60]
+
         while self.running:
             try:
                 if not self.input_device:
-                    # Verifica se há novos dispositivos disponíveis
-                    if self.check_for_new_devices():
-                        self.input_device = self.find_qr_device()
-                    else:
-                        self.input_device = self.find_qr_device()
-                    
+                    self.input_device = self.find_qr_device()
+
                     if not self.input_device:
+                        wait = retry_intervals[min(device_retry_count, len(retry_intervals) - 1)]
+                        if not missing_device_alerted:
+                            self.logger.warning("Nenhum leitor QR conectado. Aguardando dispositivo.")
+                            missing_device_alerted = True
                         device_retry_count += 1
-                        if device_retry_count <= max_device_retries:
-                            self.logger.warning(f"Dispositivo de entrada não encontrado. Tentativa {device_retry_count}/{max_device_retries}. Tentando novamente em 10s...")
-                            time.sleep(10)
-                        else:
-                            self.logger.error(f"Falha ao encontrar dispositivo após {max_device_retries} tentativas. Aguardando 30s antes de tentar novamente...")
-                            # Log detalhado de hardware quando há falhas persistentes
-                            if device_retry_count == max_device_retries:
-                                self.logger.error("Registrando informações de hardware devido a falhas persistentes:")
-                                self.log_hardware_info()
-                            time.sleep(30)
-                            device_retry_count = 0  # Reset contador
+                        time.sleep(wait)
                         continue
                     else:
-                        device_retry_count = 0  # Reset contador quando dispositivo é encontrado
-                        self.logger.info(f"Dispositivo conectado com sucesso: {self.input_device.name}")
+                        device_retry_count = 0
+                        missing_device_alerted = False
+                        self.logger.info(f"Leitor conectado: {self.input_device.name} ({self.input_device.path})")
                 
                 # Testa se o dispositivo ainda está acessível
                 try:
@@ -738,9 +831,6 @@ class StockflowQRService:
             self.logger.warning("Falha inicial na conexão com banco. Continuando...")
         
         self.running = True
-        
-        # Registra informações de hardware para troubleshooting
-        self.log_hardware_info()
         
         # Inicia threads
         self.queue_processor_thread = threading.Thread(target=self.queue_processor, daemon=True)

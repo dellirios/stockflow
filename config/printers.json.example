@@ -1,0 +1,12 @@
+{
+  "impressoras": [
+    {
+      "id": "LOJA-EXEMPLO",
+      "nome": "Zebra_Technologies_ZTC_ZD220-203dpi_ZPL",
+      "ativo": true,
+      "dpi": 203,
+      "dpmm": 8,
+      "anydesk_id": ""
+    }
+  ]
+}

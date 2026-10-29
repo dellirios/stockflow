@@ -1,70 +1,110 @@
 // src/app.js - Versão Otimizada
 // © 2025 StockFlow
 
-require('dotenv').config();
 const express = require('express');
-const morgan = require('morgan');
 const cors = require('cors');
-const axios = require('axios');
+const morgan = require('morgan');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const etiquetasRouter = require('./api/etiquetas');
-const versionRouter = require('./api/version');
 const { imprimirEtiquetas, getHealthStats } = require('./services/printerService');
-const VersionManager = require('./utils/versionManager');
+const logger = require('./utils/logger').logger;
 
-// ---------- Configuração e Constantes ---------- //
-const PORT = process.env.PORT || 5000;
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 2508;
 const HOST = process.env.HOST || '0.0.0.0';
+
+// Rate limiting configuration
+const limiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+  message: {
+    error: 'Too many requests from this IP, please try again later.',
+    retryAfter: '15 minutes'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// API specific rate limiting (more restrictive)
+const apiLimiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.API_RATE_LIMIT_MAX_REQUESTS) || 50,
+  message: {
+    error: 'Too many API requests from this IP, please try again later.',
+    retryAfter: '15 minutes'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
+}));
+
+// Apply rate limiting to all requests
+app.use(limiter);
+
+// Middleware
+app.use(express.json({ 
+  limit: process.env.MAX_REQUEST_SIZE || '10mb',
+  verify: (req, res, buf) => {
+    // Log large requests for monitoring
+    if (buf.length > 1024 * 1024) { // 1MB
+      logger.logSecurity('Large request received', {
+        size: buf.length,
+        ip: req.ip,
+        userAgent: req.get('User-Agent')
+      });
+    }
+  }
+}));
+
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGIN || '*',
+  credentials: true
+}));
+
+// Add missing imports for daemon functionality
+const axios = require('axios');
 const LONG_POLL_URL = process.env.LONG_POLL_URL || 'https://stockflow.pro/start.php';
 const IS_PROD = process.env.NODE_ENV === 'production';
 
-// ---------- Logger Simples ---------- //
-// Um logger simples para padronizar as mensagens e controlar a verbosidade.
-const logger = {
-  info: (msg) => console.log(`[${new Date().toISOString()}] [INFO] ${msg}`),
-  error: (msg, err) => console.error(`[${new Date().toISOString()}] [ERROR] ${msg}`, err || ''),
-  debug: (obj) => {
-    if (!IS_PROD) {
-      console.dir(obj, { depth: null });
-    }
+// Configuração otimizada do axios para long polling
+const axiosInstance = axios.create({
+  timeout: 65000,
+  headers: {
+    'Connection': 'keep-alive',
+    'Accept-Encoding': 'gzip',
+    'User-Agent': 'StockFlow-Daemon/1.0',
+    'Accept': 'application/json'
   },
-};
-
-// ---------- Aplicação Express ---------- //
-const app = express();
-
-// ---------- Inicialização do Version Manager ---------- //
-const versionManager = new VersionManager();
-logger.info(`StockFlow v${versionManager.getCurrentVersion()} iniciado`);
-
-// Segurança: remover header X-Powered-By
-app.disable('x-powered-by');
-app.use((req, res, next) => {
-  res.set('X-Powered-By', '');
-  res.removeHeader('X-Powered-By');
-  next();
+  // Configurações para lidar com conexões instáveis
+  maxRedirects: 3,
+  validateStatus: function (status) {
+    return status >= 200 && status < 300;
+  }
 });
 
-app.use(express.json({ limit: '2mb' }));
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGIN || '*',
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type'],
-}));
-
-// Use um logger HTTP menos verboso em produção.
-app.use(IS_PROD ? morgan('tiny') : morgan('dev'));
-
-// Debug middleware temporário
-app.use((req, res, next) => {
-  console.log(`[DEBUG] ${req.method} ${req.url}`);
-  next();
-});
+if (process.env.NODE_ENV !== 'production') {
+  app.use(morgan('combined', {
+    stream: {
+      write: (message) => logger.info(message.trim())
+    }
+  }));
+}
 
 // ---------- Rotas e Middlewares ---------- //
-
-app.use('/imprimir-etiqueta', etiquetasRouter);
-app.use('/api/version', versionRouter);
-
 app.get('/health', (req, res) => {
   try {
     const healthStats = getHealthStats();
@@ -85,6 +125,7 @@ app.get('/health', (req, res) => {
     res.status(500).json({ status: 'error', message: err.message });
   }
 });
+app.use('/imprimir-etiqueta', apiLimiter, etiquetasRouter);
 
 // Endpoint de métricas simplificado
 app.get('/metrics', (req, res) => {
@@ -128,12 +169,20 @@ app.use((err, req, res, next) => {
 // ---------- Daemon Otimizado com Circuit Breaker ---------- //
 let keepRunning = true;
 let consecutiveFailures = 0;
+let consecutiveNoOpCycles = 0;
 let lastFailureTime = 0;
 const CIRCUIT_BREAKER_TIMEOUT = 30000; // 30s
 const MAX_FAILURES = 3;
+const EMPTY_POLL_BASE_DELAY_MS = parseInt(process.env.EMPTY_POLL_BASE_DELAY_MS || '3000', 10);
+const NOOP_PAYLOAD_BASE_DELAY_MS = parseInt(process.env.NOOP_PAYLOAD_BASE_DELAY_MS || '5000', 10);
+const MAX_IDLE_BACKOFF_MS = parseInt(process.env.MAX_IDLE_BACKOFF_MS || '20000', 10);
 
 function jitter(base, variance = 0.3) {
   return base + (Math.random() - 0.5) * 2 * variance * base;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function shouldSkipDueToCircuitBreaker() {
@@ -158,17 +207,11 @@ async function iniciarDaemon() {
       // Circuit breaker check
       if (shouldSkipDueToCircuitBreaker()) {
         const waitTime = jitter(5000); // 3.5-6.5s com jitter
-        await new Promise(res => setTimeout(res, waitTime));
+        await sleep(waitTime);
         continue;
       }
 
-      const { data } = await axios.get(LONG_POLL_URL, { 
-        timeout: 65000,
-        headers: {
-          'Connection': 'keep-alive',
-          'Accept-Encoding': 'gzip'
-        }
-      });
+      const { data } = await axiosInstance.get(LONG_POLL_URL);
 
       if (data && Array.isArray(data.data) && data.data.length > 0) {
         logger.info(`Recebidas ${data.data.length} etiquetas para processar.`);
@@ -177,58 +220,155 @@ async function iniciarDaemon() {
         const resultado = await imprimirEtiquetas(data);
         
         const processingTime = Date.now() - startTime;
-        logger.info(`Processamento concluído em ${processingTime}ms`);
+        const printedCount = Array.isArray(resultado)
+          ? resultado.filter(item => item?.status === 'impresso').length
+          : 0;
+        logger.info(`Processamento concluído em ${processingTime}ms (impressas=${printedCount})`);
         
         // Reset failures on success
         consecutiveFailures = 0;
+        
+        // Se vier payload mas nada foi impresso, desacelera para evitar loop quente.
+        if (printedCount === 0) {
+          consecutiveNoOpCycles = Math.min(consecutiveNoOpCycles + 1, 8);
+          const baseDelay = Math.min(
+            NOOP_PAYLOAD_BASE_DELAY_MS * Math.pow(1.6, consecutiveNoOpCycles - 1),
+            MAX_IDLE_BACKOFF_MS
+          );
+          await sleep(jitter(baseDelay));
+        } else {
+          consecutiveNoOpCycles = 0;
+        }
         
         if (!IS_PROD) {
           logger.debug(resultado);
         }
       } else {
         // Backoff em ciclos vazios
-        const waitTime = jitter(2000); // 1.4-2.6s com jitter
-        await new Promise(res => setTimeout(res, waitTime));
+        consecutiveNoOpCycles = Math.min(consecutiveNoOpCycles + 1, 8);
+        const baseDelay = Math.min(
+          EMPTY_POLL_BASE_DELAY_MS * Math.pow(1.4, consecutiveNoOpCycles - 1),
+          MAX_IDLE_BACKOFF_MS
+        );
+        await sleep(jitter(baseDelay));
       }
       
     } catch (err) {
       consecutiveFailures++;
       lastFailureTime = Date.now();
       
+      // Tratamento específico para diferentes tipos de erro
       if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
         // Timeout normal do long-polling - não é erro real
         consecutiveFailures = Math.max(0, consecutiveFailures - 1);
+        logger.debug('Long polling timeout - reconectando...');
+      } else if (err.code === 'ECONNRESET' || err.message === 'socket hang up') {
+        // Erro de conexão - reduzir severidade
+        consecutiveFailures = Math.max(0, consecutiveFailures - 1);
+        logger.warn('Conexão perdida - reconectando...', { error: err.message });
+      } else if (err.response && err.response.status >= 500) {
+        // Erro do servidor - aguardar mais tempo
+        logger.warn(`Erro do servidor (${err.response.status}) - aguardando...`);
       } else {
-        logger.error(`Falha no daemon (${consecutiveFailures}/${MAX_FAILURES}):`, err.message);
-        
-        // Backoff exponencial com jitter em caso de erro
-        const baseDelay = Math.min(Math.pow(2, consecutiveFailures - 1) * 1000, 10000);
-        const waitTime = jitter(baseDelay);
-        await new Promise(res => setTimeout(res, waitTime));
+        // Use enhanced error logging for daemon failures
+        logger.logError(err, {
+          context: 'daemon_failure',
+          consecutiveFailures,
+          maxFailures: MAX_FAILURES,
+          lastFailureTime
+        });
       }
+      
+      // Backoff exponencial com jitter em caso de erro
+      const baseDelay = Math.min(Math.pow(2, consecutiveFailures - 1) * 1000, 10000);
+      const waitTime = jitter(baseDelay);
+      await sleep(waitTime);
     }
   }
   logger.info('Daemon finalizado.');
 }
 
 
-// ---------- Inicialização e Desligamento Gracioso ---------- //
+// Global error handler
+app.use((err, req, res, next) => {
+  // Use the enhanced error logging with email notification
+  logger.logError(err, {
+    url: req.url,
+    method: req.method,
+    ip: req.ip,
+    userAgent: req.get('User-Agent'),
+    body: req.body,
+    params: req.params,
+    query: req.query
+  });
 
+  // Don't leak error details in production
+  const isDevelopment = process.env.NODE_ENV !== 'production';
+  
+  res.status(err.status || 500).json({
+    error: isDevelopment ? err.message : 'Internal server error',
+    timestamp: new Date().toISOString(),
+    ...(isDevelopment && { stack: err.stack })
+  });
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    error: 'Endpoint not found',
+    path: req.originalUrl,
+    method: req.method,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM received, shutting down gracefully');
+  server.close(() => {
+    logger.info('Process terminated');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  logger.info('SIGINT received, shutting down gracefully');
+  server.close(() => {
+    logger.info('Process terminated');
+    process.exit(0);
+  });
+});
+
+// ---------- Inicialização e Desligamento Gracioso ---------- //
+logger.info(`Tentando iniciar servidor na porta ${PORT}...`);
 
 const server = app.listen(PORT, HOST, () => {
-  logger.info(`Servidor HTTP rodando em http://${HOST}:${PORT}`);
-  
-
+  logger.info(`✅ StockFlow server running on http://${HOST}:${PORT}`);
+  logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  logger.info(`Process ID: ${process.pid}`);
   
   // Inicia o daemon apenas depois que o servidor estiver no ar.
-  iniciarDaemon();
+  iniciarDaemon().catch(err => {
+    logger.error('❌ Erro fatal no daemon:', err);
+    process.exit(1);
+  });
+});
+
+// Tratamento de erro explícito para falhas no listen (ex: EADDRINUSE)
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    logger.error(`❌ Erro: A porta ${PORT} já está em uso por outro processo.`);
+    console.error(`\n FATAL: A porta ${PORT} já está sendo usada.`);
+    console.error(` Use 'fuser -k ${PORT}/tcp' para liberar a porta ou mude a variável PORT no código.\n`);
+  } else {
+    logger.error('❌ Erro fatal ao iniciar o servidor:', err);
+  }
+  process.exit(1);
 });
 
 function gracefulShutdown() {
   logger.info('Recebido sinal de desligamento. Encerrando graciosamente...');
   keepRunning = false; // Sinaliza para o daemon parar o loop
-  
-
 
   server.close(() => {
     logger.info('Servidor HTTP encerrado.');
@@ -238,6 +378,3 @@ function gracefulShutdown() {
     }, 1000); 
   });
 }
-
-process.on('SIGTERM', gracefulShutdown); // Sinal de término (padrão do Docker, SystemD)
-process.on('SIGINT', gracefulShutdown);  // Sinal de interrupção (Ctrl+C)
