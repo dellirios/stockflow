@@ -1,0 +1,19 @@
+{
+  "width": 480,
+  "height": 480,
+  "left": 12,
+  "right": 436,
+  "gap": 16,
+  "header": { "y": 6, "height": 40 },
+  "rows": [
+    { "y": 48, "height": 56 },
+    { "y": 104, "height": 56 },
+    { "y": 160, "height": 56 },
+    { "y": 216, "height": 56 }
+  ],
+  "supplier": { "y": 272, "height": 52 },
+  "company": { "y": 324, "height": 56 },
+  "footer": { "y": 380, "height": 88 },
+  "minFont": 18,
+  "quietModules": 4
+}

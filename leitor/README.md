@@ -44,7 +44,7 @@ sudo usermod -a -G input stockflow
 ### Instalação Automática
 
 ```bash
-cd /home/stockflow/Stockflow/leitor
+cd /home/stockflow/stockflow/leitor
 ./install.sh
 ```
 
@@ -67,7 +67,7 @@ sudo systemctl enable stockflow-leitor.service
 
 ### Arquivo de Configuração
 
-O serviço lê a configuração de `/home/stockflow/Stockflow/config/printers.json`:
+O serviço lê a configuração de `/home/stockflow/stockflow/config/printers.json`:
 
 ```json
 {
@@ -119,14 +119,14 @@ sudo journalctl -u stockflow-leitor -f
 sudo journalctl -u stockflow-leitor --since "24 hours ago"
 
 # Ver logs do arquivo local
-tail -f /home/stockflow/Stockflow/leitor/leitor.log
+tail -f /home/stockflow/stockflow/leitor/leitor.log
 ```
 
 ### Teste Manual
 
 ```bash
 # Executar em modo debug
-cd /home/stockflow/Stockflow/leitor
+cd /home/stockflow/stockflow/leitor
 python3 leitor.py
 ```
 
@@ -155,7 +155,7 @@ python3 leitor.py
 ## Arquivos
 
 ```
-/home/stockflow/Stockflow/leitor/
+/home/stockflow/stockflow/leitor/
 ├── leitor.py                    # Serviço principal
 ├── requirements.txt             # Dependências Python
 ├── install.sh                   # Script de instalação
@@ -190,7 +190,7 @@ python3 leitor.py
 sudo journalctl -u stockflow-leitor --no-pager
 
 # Verificar permissões
-ls -la /home/stockflow/Stockflow/config/printers.json
+ls -la /home/stockflow/stockflow/config/printers.json
 ls -la /dev/input/event*
 ```
 
@@ -222,7 +222,7 @@ netstat -an | grep 3306
 
 # Verificar recursos
 top -p $(pgrep -f leitor.py)
-df -h /home/stockflow/Stockflow/leitor/
+df -h /home/stockflow/stockflow/leitor/
 ```
 
 ## Desenvolvimento

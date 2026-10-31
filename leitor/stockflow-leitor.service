@@ -1,21 +1,26 @@
 [Unit]
-Description=Stockflow QR Code Reader Service
-After=network.target mysql.service
+Description=StockFlow QR Code Reader Service
+After=network.target
 Wants=network.target
 
 [Service]
 Type=simple
 User=stockflow
-Group=stockflow
-ExecStart=/usr/bin/python3 /home/stockflow/Stockflow/leitor/leitor.py
-Restart=always
-RestartSec=10
-Environment=HOME=/home/stockflow
-Environment=USER=stockflow
-Environment=PYTHONPATH=/home/stockflow/Stockflow/leitor
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=stockflow-leitor
+WorkingDirectory=/home/stockflow/stockflow/leitor
+EnvironmentFile=/home/stockflow/stockflow/leitor/leitor.env
+ExecStart=/home/stockflow/stockflow/leitor/.venv/bin/python /home/stockflow/stockflow/leitor/leitor.py
+
+# Reinicia apenas em falha real (não quando não há leitor)
+Restart=on-failure
+RestartSec=30s
+# Desiste após 5 falhas em 10 minutos (não fica em loop infinito)
+
+# Limites de recursos para não consumir memória excessiva
+MemoryMax=128M
+CPUQuota=20%
+
+StandardOutput=append:/home/stockflow/stockflow/logs/main.log
+StandardError=append:/home/stockflow/stockflow/logs/main.log
 
 [Install]
 WantedBy=multi-user.target

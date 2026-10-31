@@ -1,0 +1,11 @@
+{
+  "nome": "ELGIN_L42PRO",
+  "ativo": true,
+  "intensidade": 15,
+  "geometria": {
+    "largura_mm": 60,
+    "altura_mm": 60,
+    "resolucao_dpi": 203,
+    "offset_horizontal_mm": 4
+  }
+}

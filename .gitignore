@@ -69,3 +69,16 @@ printer-emulator.log
 impressao_*.ndjson
 # Backup de scripts antigos
 scripts-backup-*/
+
+# Ambientes e configuracoes do leitor
+.venv/
+**/.venv*/
+__pycache__/
+*.pyc
+leitor/leitor.env
+leitor/jobs.json
+config/device_config.json
+*.before-*
+*.origin-*
+*.backup-*
+logs-origin-*/

@@ -1,3 +1,5 @@
+> **Versao atualizada em 31/10/2026:** veja [instalacao, configuracoes e verificacoes desta versao](docs/versao-2026-10-31.md). As instrucoes historicas abaixo podem citar caminhos e recursos da versao anterior.
+
 # 📦 StockFlow - Sistema Completo de Gestão
 
 > Sistema de gestão de estoque com impressão de etiquetas, auto-atualização e otimização para produção.

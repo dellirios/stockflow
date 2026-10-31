@@ -1,0 +1,11 @@
+{
+  "impressoras": [
+    {
+      "id": "SUA_STORE_KEY",
+      "nome": "NOME_DA_FILA_CUPS",
+      "ativo": true,
+      "dpi": 203,
+      "dpmm": 8
+    }
+  ]
+}

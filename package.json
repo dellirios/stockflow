@@ -1,10 +1,18 @@
 {
   "name": "stockflow",
-  "version": "2.0.1",
+  "version": "2.0.0",
   "description": "Sistema de impressão ultra-otimizado para etiquetas",
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
+    "test": "node tests/run-tests.js",
+    "test:unit": "node tests/printerService.test.js",
+    "test:elgin": "node tests/elginLabelLayout.test.js && node tests/printerGeometry.test.js",
+    "preview:elgin": "node scripts/preview-elgin.js",
+    "preview:elgin:watch": "node scripts/preview-elgin.js --watch",
+    "test:integration": "node tests/integration.test.js",
+    "test:printer": "node tests/printer-integration.test.js",
+    "emulator": "node tests/printer-emulator.js",
     "dev": "NODE_ENV=development node src/app.js",
     "health": "curl -s http://localhost:5000/health | jq",
     "metrics": "curl -s http://localhost:5000/metrics | jq"
@@ -14,9 +22,12 @@
     "body-parser": "^2.2.0",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
-    "express": "^5.1.0",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0",
+    "joi": "^18.0.1",
     "morgan": "^1.10.0",
-    "mysql2": "^3.6.5",
+    "nodemailer": "^7.0.10",
     "winston": "^3.17.0"
   },
   "keywords": [
@@ -27,15 +38,5 @@
     "performance"
   ],
   "author": "StockFlow Team",
-  "license": "MIT",
-  "bin": {
-    "stockflow-version": "./version-cli.js"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/dellirios/stockflow.git"
-  },
-  "engines": {
-    "node": ">=14.0.0"
-  }
+  "license": "MIT"
 }
