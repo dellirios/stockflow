@@ -7,7 +7,7 @@ const morgan = require('morgan');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const etiquetasRouter = require('./api/etiquetas');
-const { imprimirEtiquetas, getHealthStats } = require('./services/printerService');
+const { imprimirEtiquetas, getHealthStats, processPrinterCommands, getPrinterTelemetry } = require('./services/printerService');
 const logger = require('./utils/logger').logger;
 
 require('dotenv').config();
@@ -15,6 +15,7 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 2508;
 const HOST = process.env.HOST || '0.0.0.0';
+const agentHeartbeat = require('./services/agentHeartbeat').startHeartbeat(getPrinterTelemetry);
 
 // Rate limiting configuration
 const limiter = rateLimit({
@@ -96,6 +97,15 @@ const axiosInstance = axios.create({
   }
 });
 
+if (process.env.PRINT_FEEDBACK_TOKEN) {
+  const pollingTarget = new URL(LONG_POLL_URL);
+  if (pollingTarget.origin !== 'https://stockflow.pro' || pollingTarget.pathname !== '/start.php' ||
+      pollingTarget.username || pollingTarget.password || pollingTarget.searchParams.get('print_feedback') !== '1') {
+    throw new Error('Destino de polling moderno invalido');
+  }
+  axiosInstance.defaults.headers.common.Authorization = 'Bearer ' + process.env.PRINT_FEEDBACK_TOKEN;
+}
+
 if (process.env.NODE_ENV !== 'production') {
   app.use(morgan('combined', {
     stream: {
@@ -118,6 +128,7 @@ app.get('/health', (req, res) => {
     const healthStats = getHealthStats();
     const systemStats = {
       ...healthStats,
+      agent_heartbeat: agentHeartbeat,
       daemon_failures: consecutiveFailures,
       daemon_circuit_breaker: consecutiveFailures >= MAX_FAILURES,
       node_uptime: Math.floor(process.uptime()),
@@ -220,6 +231,7 @@ async function iniciarDaemon() {
       }
 
       const { data } = await axiosInstance.get(LONG_POLL_URL);
+      await processPrinterCommands(data?.commands);
 
       if (data && Array.isArray(data.data) && data.data.length > 0) {
         logger.info(`Recebidas ${data.data.length} etiquetas para processar.`);
@@ -229,7 +241,7 @@ async function iniciarDaemon() {
         
         const processingTime = Date.now() - startTime;
         const printedCount = Array.isArray(resultado)
-          ? resultado.filter(item => item?.status === 'impresso').length
+          ? resultado.filter(item => ['impresso', 'concluido_local'].includes(item?.status)).length
           : 0;
         logger.info(`Processamento concluído em ${processingTime}ms (impressas=${printedCount})`);
         

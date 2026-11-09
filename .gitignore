@@ -82,3 +82,10 @@ config/device_config.json
 *.origin-*
 *.backup-*
 logs-origin-*/
+
+# Private machine state and database exports
+config/database.json
+db.sql
+*.sql.gz
+.env.backup-*
+*.tar.gz

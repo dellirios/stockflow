@@ -8,11 +8,13 @@ const { setTimeout: delay } = require('node:timers/promises');
 const root = path.resolve(__dirname, '..');
 const output = path.join(root, 'logs', 'previa-elgin');
 const layoutPath = path.join(root, 'src/services/elginLabelLayout.js');
+const zebraLayoutPath = path.join(root, 'src/services/zebraLabelLayout.js');
 const settingsPath = path.join(root, 'src/services/printerGeometry.js');
 const configPath = path.join(root, 'config/printers.json');
 const fixturePath = path.join(root, 'tests/fixtures/elgin-preview.json');
-const watched = [layoutPath, settingsPath, configPath, fixturePath];
-const endpoint = 'https://api.labelary.com/v1/printers/8dpmm/labels/2.3622047244x2.3622047244/0/';
+const zebraFixturePath = path.join(root, 'tests/fixtures/zebra-preview.json');
+const watched = [layoutPath, zebraLayoutPath, settingsPath, configPath, fixturePath, zebraFixturePath];
+const endpoint = 'https://api.labelary.com/v1/printers/8dpmm/labels/2.3646x2.3646/0/';
 let running = false;
 let pending = false;
 
@@ -54,12 +56,17 @@ async function refresh() {
   running = true;
   try {
     const { buildElginLabel } = reload(layoutPath);
+    const { buildZebraLabel } = reload(zebraLayoutPath);
     const { applyPrinterSettings } = reload(settingsPath);
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    const printer = config.impressoras.find(p => p.nome === 'ELGIN_L42PRO');
-    if (!printer || printer.geometria.resolucao_dpi !== 203) throw new Error('Previa requer Elgin configurada em 203 dpi');
-    const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
-    const label = buildElginLabel(fixture);
+    const printer = config.impressoras.find(p => p.nome === 'ELGIN_L42PRO') ||
+      config.impressoras.find(p => /(?:ZD220|GC420t)/i.test(p.nome || ''));
+    if (!printer || (printer.geometria?.resolucao_dpi ?? printer.dpi ?? 203) !== 203) {
+      throw new Error('Previa requer impressora configurada em 203 dpi');
+    }
+    const zebra = /(?:ZD220|GC420t)/i.test(printer.nome || '');
+    const fixture = JSON.parse(fs.readFileSync(zebra ? zebraFixturePath : fixturePath, 'utf8'));
+    const label = zebra ? buildZebraLabel(fixture) : buildElginLabel(fixture);
     const actual = applyPrinterSettings(label.zpl, printer);
     const hash = createHash('sha256').update(actual).digest('hex');
     fs.mkdirSync(output, { recursive: true });
@@ -75,7 +82,9 @@ async function refresh() {
       status: 'ok', updated_at: new Date().toISOString(), hash,
       dados: 'exemplo de teste; CNPJ ficticio',
       renderer: 'Labelary; nao simula mecanica, ribbon ou temperatura',
-      offset_horizontal_mm: printer.geometria.offset_horizontal_mm,
+      printer: printer.nome,
+      layout: zebra ? 'zebra-premium-60x60' : 'elgin-60x60',
+      offset_horizontal_mm: printer.geometria?.offset_horizontal_mm ?? 0,
       intensidade: printer.intensidade,
       layout_image: 'layout antes da compensacao mecanica',
       command_image: 'comandos com offset; referencia digital da origem',

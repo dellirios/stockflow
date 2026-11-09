@@ -96,14 +96,14 @@ function escapeData(text) {
 // Exact byte-mode capacities, Model 2 / ECC L, versions 1..5 (DENSO).
 // Manual byte mode prevents automatic numeric/alphanumeric mode selection
 // from changing the symbol dimensions calculated here.
-function qrGeometry(input, box) {
+function qrGeometry(input, box, maxMagnification = 3) {
   const data = String(input ?? '').normalize('NFC').trim();
   if (!data) throw new Error('Codigo de retirada ausente; QR Code nao pode ser gerado');
   const bytes = Buffer.byteLength(data, 'utf8');
   const version = [17, 32, 53, 78, 106].findIndex(capacity => bytes <= capacity) + 1;
   if (!version) throw new Error('Conteudo do QR Code excede a area disponivel na etiqueta 60x60 mm');
   const modules = 17 + 4 * version;
-  const magnification = Math.min(3, Math.floor(Math.min(box.width, box.height) / (modules + 8)));
+  const magnification = Math.min(maxMagnification, Math.floor(Math.min(box.width, box.height) / (modules + 8)));
   if (magnification < 2) throw new Error('QR Code ficaria pequeno demais para leitura');
   const size = (modules + 8) * magnification;
   const x = box.x + Math.floor((box.width - size) / 2);
@@ -119,11 +119,11 @@ function overlaps(a, b) {
     a.y < b.y + b.height && a.y + a.height > b.y;
 }
 
-function validateElements(elements) {
+function validateElements(elements, bounds = LAYOUT) {
   for (const element of elements) {
-    if (element.x < LAYOUT.left || element.y < 0 ||
-        element.x + element.width > LAYOUT.right ||
-        element.y + element.height > LAYOUT.height - 12) {
+    if (element.x < bounds.left || element.y < 0 ||
+        element.x + element.width > bounds.right ||
+        element.y + element.height > bounds.height - 12) {
       throw new Error(`Elemento fora dos limites: ${element.name}`);
     }
   }

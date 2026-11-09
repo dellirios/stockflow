@@ -14,12 +14,83 @@ const crypto = require('crypto');
 const { logger } = require('../utils/logger');
 const { applyPrinterSettings } = require('./printerGeometry');
 const { buildElginLabel } = require('./elginLabelLayout');
+const { buildZebraLabel } = require('./zebraLabelLayout');
 require('dotenv').config();
 
 // ---------- Paths & Constantes ---------- //
 const PRINTERS_CONFIG_PATH = path.resolve(__dirname, '../../config/printers.json');
 const TEMPLATE_DIR = path.join(__dirname, '../templates');
 const LOG_DIR = path.resolve(__dirname, '../../logs');
+const { PrintFeedbackMonitor, readUsb } = require('./printFeedbackMonitor');
+const LOCAL_FEEDBACK = process.env.ZEBRA_FEEDBACK_LOCAL_ONLY === 'true';
+const ZEBRA_PRINTER_NAME = process.env.ZEBRA_PRINTER_NAME || 'Zebra_Technologies_ZTC_ZD220-203dpi_ZPL';
+const feedbackMonitor = LOCAL_FEEDBACK ? new PrintFeedbackMonitor() : null;
+const usesLocalFeedback = printer => LOCAL_FEEDBACK && printer?.nome === ZEBRA_PRINTER_NAME;
+const { PrinterCalibration } = require('./printerCalibration');
+const calibration = feedbackMonitor ? new PrinterCalibration({
+  monitor: feedbackMonitor, printer: ZEBRA_PRINTER_NAME,
+  submit: payload => sendToPrinterCUPS(ZEBRA_PRINTER_NAME, payload, 1, true),
+}) : null;
+const {createPrinterTelemetry,snapshotTelemetry}=require('./printerTelemetry');
+const getPrinterTelemetry=createPrinterTelemetry({
+  activity:()=>{
+    if(!feedbackMonitor)return {state:'indisponivel',reasons:[],age_seconds:0};
+    if([...calibration.records.values()].at(-1)?.state==='calibrando')return {state:'calibrando',reasons:[],age_seconds:0};
+    if(feedbackMonitor.phase==='printing'){
+      const active=[...feedbackMonitor.records.values()].filter(r=>r.submissionStarted&&!r.supersededBy&&!['concluido','cancelado'].includes(r.state))
+        .sort((a,b)=>String(a.updatedAt).localeCompare(String(b.updatedAt))).at(-1);
+      if(active?.lastObservation?.status.reasons.length)return snapshotTelemetry(active.lastObservation,
+        Math.floor((Date.now()-Date.parse(active.lastObservation.observedAt))/1000));
+      return {state:'imprimindo',reasons:[],age_seconds:0};
+    }
+    if(RUNNING || feedbackMonitor.running){
+      const latest=[...feedbackMonitor.records.values()].filter(r=>r.lastObservation&&!r.supersededBy)
+        .sort((a,b)=>String(a.lastObservation.observedAt).localeCompare(String(b.lastObservation.observedAt))).at(-1);
+      if(latest)return snapshotTelemetry(latest.lastObservation,Math.floor((Date.now()-Date.parse(latest.lastObservation.observedAt))/1000));
+      return {state:'indisponivel',reasons:[],age_seconds:0};
+    }
+    return null;
+  },
+  read:async()=>{
+    if(!feedbackMonitor || RUNNING || feedbackMonitor.running)return null;
+    RUNNING=true;feedbackMonitor.running=true;
+    try{return await readUsb();}
+    finally{feedbackMonitor.running=false;RUNNING=false;}
+  },
+});
+let calibrationPollBusy = false;
+if (calibration && process.env.PRINT_FEEDBACK_TOKEN) {
+  const timer = setInterval(async () => {
+    if (feedbackMonitor.phase !== 'preflight' || calibrationPollBusy || feedbackMonitor.maintenanceRequested) return;
+    calibrationPollBusy = true;
+    try {
+      const response = await fetch('https://stockflow.pro/api/print-agent/commands', {
+        headers: { Authorization: 'Bearer ' + process.env.PRINT_FEEDBACK_TOKEN, Accept: 'application/json' },
+        redirect: 'error', signal: AbortSignal.timeout(3000),
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (Array.isArray(data.commands) && data.commands.some(c => c.type === 'calibrate')) {
+        feedbackMonitor.maintenanceRequested = true;
+      }
+    } catch (_) { /* Keep waiting for the physical printer; no command is assumed. */ }
+    finally { calibrationPollBusy = false; }
+  }, 2000);
+  timer.unref();
+}
+
+async function processPrinterCommands(commands) {
+  if (!calibration || RUNNING) return;
+  RUNNING = true;
+  try { await calibration.process(commands || []); }
+  finally { feedbackMonitor.maintenanceRequested = false; RUNNING = false; }
+}
+
+if (feedbackMonitor) {
+  require('./printFeedbackOutbox').startOutbox(feedbackMonitor);
+}
+
+
 
 // ---------- Cache e Estado Global ---------- //
 const DEDUP_CACHE = new Map(); // TTL cache para deduplicação
@@ -288,7 +359,7 @@ async function runResume(printer) {
 }
 
 function generateJobKey(etiqueta) {
-  const critical = `${etiqueta.store_key}|${etiqueta.id_produto}|${etiqueta.etiquetas || 1}|${etiqueta.nome}`;
+  const critical = `${etiqueta.store_key}|${etiqueta.id_produto}|${etiqueta.etiquetas || 1}|${etiqueta.nome}|${etiqueta.print_request_id || etiqueta.print_batch_uuid || etiqueta.label_code || ''}`;
   return crypto.createHash('sha1').update(critical).digest('hex');
 }
 
@@ -452,14 +523,16 @@ function formatarPeso(peso, unidade = '') {
 }
 
 function preencherZPL(etiqueta, printer = {}) {
-  if (printer.nome === 'ELGIN_L42PRO') {
+  if (printer.nome === 'ELGIN_L42PRO' || /(?:ZD220|GC420t)/i.test(printer.nome || '')) {
     const fields = { ...etiqueta };
     if (fields.data_entrada) fields.data_entrada = formatarDataBrasileira(fields.data_entrada);
     for (const field of ['validade', 'val_fornecedor', 'fab_fornecedor']) {
       if (fields[field]) fields[field] = formatarDataSemHora(fields[field]);
     }
     fields.peso_formatado = fields.peso_formatado || formatarPeso(fields.peso, fields.unidade_medida);
-    return buildElginLabel(fields).zpl;
+    return printer.nome === 'ELGIN_L42PRO'
+      ? buildElginLabel(fields).zpl
+      : buildZebraLabel(fields).zpl;
   }
   // Usa template hardcoded (policy de negócio)
   let zpl = DEFAULT_TEMPLATE;
@@ -508,7 +581,7 @@ async function sendToPrinterRaw(host, port, zpl, timeout = 5000) {
 }
 
 // Fallback CUPS com configuração otimizada
-function sendToPrinterCUPS(printerName, zpl, copies = 1) {
+function sendToPrinterCUPS(printerName, zpl, copies = 1, returnJob = false) {
   return new Promise((resolve, reject) => {
     // Determina os argumentos. Se printerName for vazio, não usa -d, forçando o padrão do CUPS.
     const args = ['-n', String(copies), '-o', 'raw'];
@@ -518,8 +591,12 @@ function sendToPrinterCUPS(printerName, zpl, copies = 1) {
       logName = printerName;
     }
 
-    const lp = spawn('lp', args);
+    const lp = spawn('lp', args, { env: { ...process.env, LC_ALL: 'C' } });
+    let stdout = '';
     let stderr = '';
+    lp.stdout.on('data', d => { stdout += d.toString(); });
+    lp.on('error', error => { clearTimeout(timer); reject(error); });
+    lp.stdin.on('error', error => { clearTimeout(timer); reject(error); });
 
     const timer = setTimeout(() => {
       lp.kill('SIGKILL');
@@ -531,7 +608,13 @@ function sendToPrinterCUPS(printerName, zpl, copies = 1) {
     lp.on('close', code => {
       clearTimeout(timer);
       if (code === 0) {
-        resolve(`CUPS enviado para ${logName} (${copies} cópia[s])`);
+        if (returnJob) {
+          const match = /request id is ([\w.-]+-\d+)/.exec(stdout);
+          if (!match) return reject(new Error('CUPS aceitou envio sem identificador verificavel'));
+          resolve({ jobId: match[1] });
+        } else {
+          resolve(`CUPS enviado para ${logName} (${copies} cópia[s])`);
+        }
       } else {
         // Loga o erro exato do comando lp (que causava o status Retido)
         reject(new Error(`lp falhou com código ${code}. Erro: ${stderr.trim() || 'Nenhum erro de stdout/stderr.'}`));
@@ -544,11 +627,22 @@ function sendToPrinterCUPS(printerName, zpl, copies = 1) {
 }
 
 // Função unificada de impressão com fail-safe
-async function sendToPrinter(printer, zpl, copies = 1, retryAfterCalibration = true) {
+async function sendToPrinter(printer, zpl, copies = 1, retryAfterCalibration = true, jobKeys = [], feedbackItems = []) {
   const startTime = Date.now();
 
   const printerName = printer.nome || printer.impressora;
   const payload = applyPrinterSettings(zpl, printer);
+  if (usesLocalFeedback(printer)) {
+    const quantities = [...payload.matchAll(/\^PQ(\d+),/g)].map(match => Number(match[1]));
+    if (!quantities.length) throw new Error('Quantidade ZPL nao verificavel');
+    const expected = quantities.reduce((sum, value) => sum + value, 0) * copies;
+    const result = await feedbackMonitor.print({ printer: printerName, keys: jobKeys, expected, items: feedbackItems,
+      submit: () => sendToPrinterCUPS(printerName, payload, copies, true) });
+    stats.p95_tti.push(Date.now() - startTime);
+    if (stats.p95_tti.length > 100) stats.p95_tti.shift();
+    return `Zebra confirmou ${result.printed} etiqueta(s); trabalho ${result.id}; ${result.cupsJobId}`;
+  }
+
 
   // Mitigação prática para ZD220 pós abertura/fechamento de tampa:
   // realiza pré-calibração automática em janela controlada.
@@ -760,7 +854,16 @@ function groupByPrinter(etiquetas, printersConfig) {
       continue;
     }
 
+    if (usesLocalFeedback(printerConfig) && process.env.PRINT_FEEDBACK_EVENTS_URL && !etiqueta.print_request_id) {
+      logThrottled('feedback:missing-request', '[Feedback] Pedido sem identidade moderna; impressao bloqueada', 60000);
+      continue;
+    }
     const jobKey = generateJobKey(etiqueta);
+    if (usesLocalFeedback(printerConfig) &&
+        (feedbackMonitor.hasRecorded(jobKey) || feedbackMonitor.needsReview(printerConfig.nome))) {
+      logThrottled('feedback:already-recorded', '[Feedback] Reenvio bloqueado: trabalho registrado ou aguardando conferencia', 60000);
+      continue;
+    }
     if (isDuplicate(jobKey)) {
       logThrottled('dedup:ignored', `[Dedup] Etiqueta duplicada ignorada: ${etiqueta.id_produto || etiqueta.id}`, 15000);
       continue;
@@ -834,6 +937,8 @@ function groupByPrinter(etiquetas, printersConfig) {
 // ---------- Serviço Principal ---------- //
 async function imprimirEtiquetas(payload) {
   if (RUNNING) return { status: 'busy', message: 'Processamento em andamento' };
+  if (calibration?.isUncertain()) return { status: 'busy', message: 'Confira a calibração ou execute uma nova calibração antes de imprimir' };
+
   RUNNING = true;
 
   const resultados = [];
@@ -846,7 +951,7 @@ async function imprimirEtiquetas(payload) {
 
     // Circuit breaker check
     if (isCircuitBreakerOpen()) {
-      throw new Error('Circuit breaker aberto - aguardando recuperação');
+      return resultados; // A rejected call must not reset the existing cooldown.
     }
 
     const printersConfig = await loadPrintersConfig();
@@ -869,7 +974,9 @@ async function imprimirEtiquetas(payload) {
         }).join('\n');
 
         // Envia batch para impressora
-        const mensagem = await sendToPrinter(group.printer, batchZpl);
+        const mensagem = await sendToPrinter(group.printer, batchZpl, 1, true, group.etiquetas.map(generateJobKey),
+          group.etiquetas.map(e => ({ id_produto: String(e.id_produto), store_key: e.store_key,
+            print_request_id: e.print_request_id || null, print_batch_uuid: e.print_batch_uuid || null, label_code: e.label_code || null })));
         updateCircuitBreaker(true);
 
         // Processa confirmações com concorrência limitada
@@ -877,7 +984,11 @@ async function imprimirEtiquetas(payload) {
           group.etiquetas,
           CONFIRM_CONCURRENCY,
           async (etiqueta) => {
-            const confirmacao = await confirmarImpressao(etiqueta.id_produto);
+            // New events stay local until the server accepts the new state contract.
+            const confirmacao = usesLocalFeedback(group.printer)
+              ? { success: false, pending_server_integration: !process.env.PRINT_FEEDBACK_EVENTS_URL, event_delivery_pending: Boolean(process.env.PRINT_FEEDBACK_EVENTS_URL) }
+              : await confirmarImpressao(etiqueta.id_produto);
+            const resultStatus = usesLocalFeedback(group.printer) ? 'concluido_local' : 'impresso';
 
             logImpressao({
               data: new Date().toISOString().split('T')[0],
@@ -888,7 +999,7 @@ async function imprimirEtiquetas(payload) {
               nome_produto: etiqueta.nome,
               quantidade: parseInt(etiqueta.etiquetas) || 1,
               impressora: group.printer.nome,
-              status: 'impresso',
+              status: resultStatus,
               mensagem,
               confirmacao_api: confirmacao,
               anydesk_id: group.printer.anydesk_id || process.env.ANYDESK_ID || 'N/A',
@@ -898,7 +1009,7 @@ async function imprimirEtiquetas(payload) {
             return {
               id: etiqueta.id_produto,
               store_key: etiqueta.store_key,
-              status: 'impresso',
+              status: resultStatus,
               mensagem,
               confirmacao_api: confirmacao
             };
@@ -910,7 +1021,13 @@ async function imprimirEtiquetas(payload) {
         stats.processed += group.etiquetas.length;
 
       } catch (err) {
-        updateCircuitBreaker(false);
+        if (!err.maintenance) updateCircuitBreaker(false);
+        if (usesLocalFeedback(group.printer)) {
+          for (const etiqueta of group.etiquetas) {
+            const key = generateJobKey(etiqueta);
+            if (!feedbackMonitor.hasRecorded(key)) DEDUP_CACHE.delete(key);
+          }
+        }
 
         // Log de erro para o grupo
         for (const etiqueta of group.etiquetas) {
@@ -923,7 +1040,7 @@ async function imprimirEtiquetas(payload) {
             nome_produto: etiqueta.nome,
             quantidade: parseInt(etiqueta.etiquetas) || 1,
             impressora: group.printer.impressora,
-            status: 'erro',
+            status: err.feedbackState || 'erro',
             mensagem: err.message,
             anydesk_id: group.printer.anydesk_id || process.env.ANYDESK_ID || 'N/A'
           };
@@ -933,7 +1050,7 @@ async function imprimirEtiquetas(payload) {
           resultados.push({
             id: etiqueta.id_produto,
             store_key: etiqueta.store_key,
-            status: 'erro',
+            status: err.feedbackState || 'erro',
             mensagem: err.message
           });
         }
@@ -977,6 +1094,9 @@ function getHealthStats() {
 
   return {
     status: 'ok',
+    print_feedback: feedbackMonitor ? feedbackMonitor.summary() : { mode: 'legacy' },
+    calibration: calibration ? { uncertain: calibration.isUncertain(),
+      latest: [...calibration.records.values()].at(-1) || null } : null,
     uptime: uptimeSeconds,
     cpu_rss: Math.round(process.memoryUsage().rss / 1024 / 1024), // MB
     breaker_state: CIRCUIT_BREAKER.state,
@@ -997,7 +1117,9 @@ startLogFlushTimer();
 
 module.exports = {
   imprimirEtiquetas,
+  processPrinterCommands,
   getHealthStats,
+  getPrinterTelemetry,
   // Funções para testes
   generateJobKey,
   isDuplicate,

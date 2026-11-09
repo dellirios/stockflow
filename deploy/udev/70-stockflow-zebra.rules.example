@@ -1,0 +1,3 @@
+# Replace SERIAL_DA_ZEBRA and stockflow with the target device serial and service group.
+# Install as /etc/udev/rules.d/70-stockflow-zebra.rules, then reload udev/reconnect when idle.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0a5f", ATTR{idProduct}=="0164", ATTR{serial}=="SERIAL_DA_ZEBRA", GROUP="stockflow", MODE="0660"

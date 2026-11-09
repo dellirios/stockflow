@@ -1,12 +1,12 @@
 {
   "name": "stockflow",
-  "version": "2.0.0",
-  "description": "Sistema de impressão ultra-otimizado para etiquetas",
+  "version": "2.1.0",
+  "description": "Agente local de impressão ZPL e leitura QR do StockFlow Pro",
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
-    "test": "node tests/run-tests.js",
-    "test:unit": "node tests/printerService.test.js",
+    "test": "node tests/run-regression.js",
+    "test:unit": "node -e \"const r=require('./tests/printerService.test').runTests();process.exit(r.failed?1:0)\"",
     "test:elgin": "node tests/elginLabelLayout.test.js && node tests/printerGeometry.test.js",
     "preview:elgin": "node scripts/preview-elgin.js",
     "preview:elgin:watch": "node scripts/preview-elgin.js --watch",
@@ -14,8 +14,10 @@
     "test:printer": "node tests/printer-integration.test.js",
     "emulator": "node tests/printer-emulator.js",
     "dev": "NODE_ENV=development node src/app.js",
-    "health": "curl -s http://localhost:5000/health | jq",
-    "metrics": "curl -s http://localhost:5000/metrics | jq"
+    "health": "curl -fsS http://127.0.0.1:2508/health",
+    "metrics": "curl -fsS http://127.0.0.1:2508/metrics",
+    "test:legacy": "node tests/run-tests.js",
+    "test:zebra": "node tests/zebraLabelLayout.test.js && node tests/zebraFeedback.test.js"
   },
   "dependencies": {
     "axios": "^1.9.0",
@@ -38,5 +40,8 @@
     "performance"
   ],
   "author": "StockFlow Team",
-  "license": "MIT"
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  }
 }

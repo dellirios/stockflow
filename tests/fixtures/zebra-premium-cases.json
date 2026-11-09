@@ -1,0 +1,13 @@
+[
+  { "id": "curto", "nome": "Arroz Branco" },
+  { "id": "medio", "nome": "Peito de frango temperado" },
+  { "id": "longo", "nome": "Peito de frango desfiado com molho de tomate artesanal, temperos naturais e ervas finas selecionadas" },
+  {
+    "id": "extensos",
+    "nome": "Peito de frango temperado",
+    "fornecedor": "Distribuidora de Alimentos Artesanais e Produtos Refrigerados Ltda",
+    "responsavel_entrada": "Maria Eduarda de Souza Albuquerque",
+    "armazenado": "Câmara de resfriados de produtos preparados",
+    "nm_empresa": "RESTAURANTE E COZINHA ARTESANAL SABORES DA CASA LTDA"
+  }
+]

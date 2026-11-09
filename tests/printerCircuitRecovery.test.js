@@ -1,0 +1,20 @@
+'use strict';
+const assert=require('node:assert/strict');
+process.env.ZEBRA_FEEDBACK_LOCAL_ONLY='false';
+const {logger}=require('../src/utils/logger');
+logger.logCritical=()=>{};
+const service=require('../src/services/printerService');
+let time=Date.now();
+const originalNow=Date.now;
+Date.now=()=>time;
+(async()=>{
+ for(let i=0;i<3;i++)service.updateCircuitBreaker(false);
+ assert.equal(service.isCircuitBreakerOpen(),true);
+ time+=20000;
+ await service.imprimirEtiquetas({data:[]});
+ time+=10001;
+ assert.equal(service.isCircuitBreakerOpen(),false,'Rejected calls must not extend the circuit cooldown');
+ service.updateCircuitBreaker(true);
+ assert.equal(service.isCircuitBreakerOpen(),false);
+ console.log('PASS circuit cooldown expires after rejected calls');
+})().then(()=>{Date.now=originalNow;process.exit(0);},e=>{Date.now=originalNow;console.error(e);process.exit(1);});
